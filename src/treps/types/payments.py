@@ -9,6 +9,7 @@ __all__ = [
     "PreAuthRequest",
     "PostAuthRequest",
     "PostAuthResponseData",
+    "RefundOrVoidSubMerchant",
     "RefundRequest",
     "VoidRequest",
     "RefundOrVoidResponseData",
@@ -45,6 +46,17 @@ class PostAuthRequest(_PostAuthRequestRequired, total=False):
     amount: float
 
 
+class RefundOrVoidSubMerchant(TypedDict):
+    """Per-sub-merchant refund allocation for a marketplace (split payment) order, used on
+    `RefundRequest`/`VoidRequest`. Note the field is genuinely named `reference_id` here — the
+    backend's *request*-side spelling — unlike the `sub_merchant_reference_id` field name used
+    everywhere on the Marketplace *response* payloads (`treps.types.marketplace`); this isn't a
+    typo in this SDK, it mirrors a real asymmetry in the API."""
+
+    reference_id: str
+    refund_amount: float
+
+
 class _RefundRequestRequired(TypedDict):
     external_transaction_id: str
     clientIp: str
@@ -60,6 +72,9 @@ class RefundRequest(_RefundRequestRequired, total=False):
     #: Amount to refund. Omit to refund the full original amount.
     amount: float
     reason: str
+    #: Marketplace (split payment) orders only: how the refund is distributed across
+    #: sub-merchants. Omit to refund the full amount as a single, non-split transaction.
+    sub_merchants: list[RefundOrVoidSubMerchant]
 
 
 class _VoidRequestRequired(TypedDict):
@@ -75,6 +90,9 @@ class VoidRequest(_VoidRequestRequired, total=False):
     #: Transaction ID of the original sale/preAuth. Required if payment_id is omitted.
     transaction_id: str
     reason: str
+    #: Marketplace (split payment) orders only: how the void is distributed across
+    #: sub-merchants. Omit to void the full amount as a single, non-split transaction.
+    sub_merchants: list[RefundOrVoidSubMerchant]
 
 
 class PostAuthResponseData(TypedDict):

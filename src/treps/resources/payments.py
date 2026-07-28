@@ -39,9 +39,13 @@ class PaymentsResource:
         return cast(PostAuthResponseData, self._client.request("POST", "/api/payment/postauth", request))
 
     def refund(self, request: RefundRequest) -> RefundOrVoidResponseData:
-        """POST /api/payment/refund — refunds a previous sale/postAuth, fully or partially."""
+        """POST /api/payment/refund — refunds a previous sale/postAuth, fully or partially. For a
+        marketplace (split payment) order, pass `sub_merchants` to control how the refund is
+        distributed across sub-merchants instead of refunding it as a single transaction."""
         return cast(RefundOrVoidResponseData, self._client.request("POST", "/api/payment/refund", request))
 
     def void(self, request: VoidRequest) -> RefundOrVoidResponseData:
-        """POST /api/payment/void — fully cancels a previous sale/preAuth."""
+        """POST /api/payment/void — fully cancels a previous sale/preAuth. For a marketplace
+        (split payment) order, pass `sub_merchants` to control how the void is distributed across
+        sub-merchants instead of voiding it as a single transaction."""
         return cast(RefundOrVoidResponseData, self._client.request("POST", "/api/payment/void", request))

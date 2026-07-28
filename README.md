@@ -11,7 +11,9 @@ Transactions** (sale / pre-auth / post-auth / refund / void), **3D Secure**, the
 **Secure Payment Page** (Hosted Page) and its **embedded IFrame** variant, **Query
 Operations** (BIN lookup, transaction/order detail & reporting, commissions, installments,
 saved-card search), **Card Operations** (add / update / remove a tokenized card), **Payment
-Links**, and **Insurance-sector Payments**. See [Roadmap](#roadmap) for what's next.
+Links**, **Insurance-sector Payments**, and **Marketplace / Split Payments** (sub-merchant
+management, order approve/pay/allocate/seize/refund/collect-debt/cancel lifecycle, settlement
+reporting, and asynchronous report downloads). See [Roadmap](#roadmap) for what's next.
 
 Full API reference: **[REPLACE ME: public docs site URL]** (Transaction Types, 3D Secure,
 Secure Payment Page, and Hash Verification pages).
@@ -319,6 +321,102 @@ refund" variant is in turn identical to its own regular refund entry, which look
 documentation copy/paste rather than an intentionally distinct contract), so nothing
 insurance-specific is duplicated here.
 
+## Marketplace / split payments
+
+Split a payment across onboarded sub-merchants and manage their whole order lifecycle:
+sub-merchant onboarding, marketplace-wide settings, order approve/pay/allocate/seize/refund/
+collect-debt/cancel, and settlement reporting. All map to `/api/marketplace/*`.
+
+```python
+submerchant = treps.marketplace.submerchant_add(
+    {
+        "reference_id": "SUB-001",
+        "name": "Example Mağazası A.Ş.",
+        "sole_prop_flag": 0,
+        "tax_office": "Kadıköy",
+        "vkn_tckn": "1234567890",
+        "address": "Örnek Mah. Örnek Cad. No:1",
+        "district": "Kadıköy",
+        "province_code": "34",
+        "country_alpha3": "TUR",
+        "email": "submerchant@example.com",
+        "phone": "5324567890",
+        "accounting_transfer_method": 1,  # IBAN
+        "iban_owner_name": "Example Mağazası A.Ş.",
+        "iban": "TR330006100519786457841326",
+        "contact_name": "Ayşe",
+        "contact_surname": "Yılmaz",
+        "blocked_day_count": 7,  # valör (payout hold) days
+        "status": 1,  # active
+    }
+)
+
+found = treps.marketplace.submerchant_find({"reference_id": "SUB-001"})
+```
+
+`treps.marketplace.config()` sets marketplace-wide settings (currently just
+`payment_transfer_approve_required`) — it's **write-only**, there is no matching read endpoint.
+
+A split order moves through approve, then pay (or `pay_allocate`), with optional seize/refund/
+collect-debt along the way, and cancel to void it outright. `order_approve`, `order_pay`, and
+`order_pay_allocate` each take a **bare array** — every element is applied against a different
+`(oid, sub_merchant_reference_id)` pair in one call:
+
+```python
+treps.marketplace.order_approve(
+    [{"oid": "OID-1", "sub_merchant_reference_id": "SUB-001", "partial_approve": False, "approve_amount": 100.0}]
+)
+
+result = treps.marketplace.order_pay_allocate(
+    [{"sub_merchant_reference_id": "SUB-001", "amount": 100.0, "payment_reference_codes": ["PAYOUT-0001"]}]
+)
+```
+
+> **`order_pay_allocate` is atomic across the whole batch.** If `result["success"]` is `False`,
+> *none* of the rows in `result["items"]` were actually applied — even a row whose own
+> `item["success"]` looks `True` was rolled back along with everything else. Only treat a row as
+> genuinely applied when both its own `item["success"]` **and** the top-level `result["success"]`
+> are `True`.
+
+Settlement reporting, paginated and filterable:
+
+```python
+summary = treps.marketplace.settlement_summary({"sub_merchant_reference_ids": ["SUB-001"]})
+detail = treps.marketplace.settlement_detail({"sub_merchant_reference_ids": ["SUB-001"]})
+```
+
+`settlement_summary_export()` kicks off an asynchronous report job instead of returning data
+directly — track and fetch it with `treps.download_jobs`:
+
+```python
+treps.marketplace.settlement_summary_export(
+    {"report_name": "monthly-settlement", "filter": {"sub_merchant_reference_ids": ["SUB-001"]}}
+)
+
+jobs = treps.download_jobs.search({"report_type": 1})  # 1 = SubMerchantSettlement
+# once a job's job_status == 2 (Completed):
+file_bytes = treps.download_jobs.download(jobs["items"][0]["id"])
+```
+
+Unlike every other method in this SDK, `download_jobs.download()` returns the raw file
+(`bytes`), not a parsed JSON envelope.
+
+To refund or void a split order, use the regular `treps.payments.refund()` / `.void()` with
+their `sub_merchants` field to control the per-sub-merchant distribution — note that field is
+genuinely named `reference_id` there (the request-side spelling), unlike the
+`sub_merchant_reference_id` field name used throughout the marketplace response payloads above:
+
+```python
+treps.payments.refund(
+    {
+        "transaction_id": tx_id,
+        "external_transaction_id": f"{oid}-refund",
+        "clientIp": "127.0.0.1",
+        "sub_merchants": [{"reference_id": "SUB-001", "refund_amount": 100.0}],
+    }
+)
+```
+
 ## Error handling
 
 Any failed request (non-2xx HTTP, or a 2xx response with `status: false`) raises
@@ -348,6 +446,7 @@ Runnable, self-contained scripts under [`examples/`](./examples):
 | [`card.py`](./examples/card.py) | Add, update, search, and remove a saved card |
 | [`payment_link.py`](./examples/payment_link.py) | Create a payment link, query its status, and list links |
 | [`insurance.py`](./examples/insurance.py) | An insurance-sector payment, then refunding it via the regular refund endpoint |
+| [`marketplace.py`](./examples/marketplace.py) | Sub-merchant onboarding, marketplace config, the order approve/pay-allocate lifecycle, settlement reporting, and an async report export |
 
 ```bash
 TREPS_USERNAME=... TREPS_PASSWORD=... TREPS_MERCHANT_ID=... python examples/quickstart.py
@@ -369,6 +468,10 @@ or supply your own HTTP stack (e.g. `requests`/`httpx`) instead of the default `
 Not yet covered by this SDK (planned as fast-follow module):
 
 - Closed Loop Wallet
+
+Note: `download_jobs.search()` items only expose `report_type`/`job_status` as strongly typed
+fields for now — the backend's full download-job record isn't fully detailed in the current API
+spec, so extra fields come through untyped.
 
 Contributions and issues are welcome — see [SECURITY.md](./SECURITY.md) for reporting
 vulnerabilities specifically.

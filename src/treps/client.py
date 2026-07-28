@@ -1,7 +1,7 @@
 """Low-level HTTP client for the Treps Payment Orchestration API. Handles login and token
 caching; use the ``payments``, ``three_d_secure``, ``hosted_page``, ``query``, ``cards``,
-``payment_links``, and ``insurance`` resource attributes built on top of it for an
-endpoint-specific API.
+``payment_links``, ``insurance``, ``marketplace``, and ``download_jobs`` resource attributes
+built on top of it for an endpoint-specific API.
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ from typing import Any
 
 from treps.errors import TrepsApiError
 from treps.resources.card import CardResource
+from treps.resources.download_job import DownloadJobResource
 from treps.resources.hosted_page import HostedPageResource
 from treps.resources.insurance import InsuranceResource
+from treps.resources.marketplace import MarketplaceResource
 from treps.resources.payment_link import PaymentLinkResource
 from treps.resources.payments import PaymentsResource
 from treps.resources.query import QueryResource
@@ -31,6 +33,14 @@ TransportResponse = tuple[int, str]
 #: (method, url, headers, body_bytes) -> TransportResponse. Advanced/testing hook to replace
 #: the default `urllib`-based transport; most callers never need this.
 Transport = Callable[[str, str, dict[str, str], "bytes | None"], TransportResponse]
+
+#: (status_code, response_bytes) returned by a binary transport call.
+BinaryTransportResponse = tuple[int, bytes]
+#: (method, url, headers) -> BinaryTransportResponse. Used only for endpoints that return a raw
+#: file instead of the standard JSON envelope (currently just `download_jobs.download()`).
+#: Advanced/testing hook to replace the default `urllib`-based transport; most callers never
+#: need this.
+BinaryTransport = Callable[[str, str, dict[str, str]], BinaryTransportResponse]
 
 
 class TrepsEnvironment(str, Enum):
@@ -63,6 +73,15 @@ def _default_transport(method: str, url: str, headers: dict[str, str], body: byt
         return exc.code, exc.read().decode("utf-8")
 
 
+def _default_binary_transport(method: str, url: str, headers: dict[str, str]) -> BinaryTransportResponse:
+    request = urllib.request.Request(url, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request) as response:  # noqa: S310 - fixed https:// URLs built from our own base_url
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
 class TrepsClient:
     def __init__(
         self,
@@ -73,6 +92,7 @@ class TrepsClient:
         base_url: str | None = None,
         token_expiry_margin_ms: int = 30_000,
         transport: Transport | None = None,
+        binary_transport: BinaryTransport | None = None,
     ) -> None:
         """
         Args:
@@ -80,6 +100,8 @@ class TrepsClient:
             base_url: Overrides the environment preset with a custom API base URL.
             token_expiry_margin_ms: Safety margin subtracted from the token's expiry. Defaults to 30s.
             transport: Advanced/testing hook to replace the default `urllib`-based transport.
+            binary_transport: Advanced/testing hook to replace the default `urllib`-based
+                transport used for raw-file endpoints (currently just `download_jobs.download()`).
         """
         self._username = username
         self._password = password
@@ -87,6 +109,7 @@ class TrepsClient:
         self._token_expiry_margin_ms = token_expiry_margin_ms
         self._base_url = base_url or _ENVIRONMENT_BASE_URLS[environment]
         self._transport: Transport = transport or _default_transport
+        self._binary_transport: BinaryTransport = binary_transport or _default_binary_transport
         self._cached_token: _CachedToken | None = None
         self._lock = threading.Lock()
 
@@ -104,6 +127,10 @@ class TrepsClient:
         self.payment_links = PaymentLinkResource(self)
         #: Insurance-sector payments.
         self.insurance = InsuranceResource(self)
+        #: Marketplace (split payment) sub-merchants, settings, order lifecycle, and settlement reporting.
+        self.marketplace = MarketplaceResource(self)
+        #: Asynchronous report download jobs (currently just marketplace settlement exports).
+        self.download_jobs = DownloadJobResource(self)
 
     def login(self) -> LoginResponseData:
         """Performs POST /api/auth and returns the raw response — most callers don't need this directly."""
@@ -130,6 +157,27 @@ class TrepsClient:
             raise TrepsApiError(message, status, parsed.get("errors") if parsed else None, parsed)
 
         return parsed.get("data")
+
+    def request_binary(self, method: str, path: str) -> bytes:
+        """GET/DELETE/etc. against the Treps API for endpoints that return a raw file instead of
+        the standard `{status, message, data, errors}` JSON envelope (currently only
+        `download_jobs.download()`). Auth works the same way as `request()`. On a non-2xx
+        response, the body is decoded as UTF-8 (best-effort, since it's typically not JSON on
+        this path) and used as the error message."""
+        token = self._ensure_logged_in()
+        headers = {"Authorization": f"Bearer {token.access_token}"}
+
+        status, content = self._binary_transport(method, self._base_url + path, headers)
+
+        if not (200 <= status < 300):
+            message = f"Treps API request failed with HTTP {status}"
+            try:
+                decoded = content.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                decoded = ""
+            raise TrepsApiError(decoded or message, status, None, None)
+
+        return content
 
     def _ensure_logged_in(self) -> _CachedToken:
         cached = self._cached_token
