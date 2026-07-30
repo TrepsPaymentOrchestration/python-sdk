@@ -127,7 +127,9 @@ class MarketplaceResource:
         return self._client.request("POST", "/api/marketplace/order/collectdept", request)
 
     def order_cancel(self, request: MarketplaceOrderCancelRequest) -> Any:
-        """POST /api/marketplace/order/cancel"""
+        """POST /api/marketplace/order/cancel — cancels/voids a marketplace order at the
+        sub-merchant level. For splitting a `client.payments.void()` across sub-merchants
+        instead, use that method's `sub_merchants` field."""
         return self._client.request("POST", "/api/marketplace/order/cancel", request)
 
     # -- Settlement reporting -------------------------------------------------
