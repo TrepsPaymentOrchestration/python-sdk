@@ -88,6 +88,8 @@ def main() -> None:
     )
     jobs = treps.download_jobs.search({"report_type": 1})  # 1 = SubMerchantSettlement
     print(f"Download jobs: {jobs['total_count']}")
+    for job in jobs["items"]:
+        print(job["id"], job["report_name"], "job_status:", job["job_status"])
 
     # Once a job's job_status == 2 (Completed):
     # file_bytes = treps.download_jobs.download(job_id)

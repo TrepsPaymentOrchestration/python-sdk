@@ -4,10 +4,11 @@ SubMerchantSettlement)."""
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 __all__ = [
     "DownloadJobSearchRequest",
+    "DownloadJob",
     "DownloadJobSearchResponseData",
 ]
 
@@ -23,12 +24,29 @@ class DownloadJobSearchRequest(TypedDict, total=False):
     page_size: int
 
 
-class DownloadJobSearchResponseData(TypedDict):
-    """Pagination envelope. Individual job fields beyond `report_type`/`job_status` (e.g. file
-    name, created date) aren't detailed in the source API spec, so entries are left as `Any` —
-    use the job's `id` with `client.download_jobs.download()`/`cancel()`."""
+class DownloadJob(TypedDict):
+    """One entry of `DownloadJobSearchResponseData.items`."""
 
-    items: list[Any]
+    id: int
+    #: 1 = SubMerchantSettlement.
+    report_type: int
+    report_name: str
+    #: 0 = Pending, 1 = Processing, 2 = Completed, 3 = Failed, 4 = Cancelling, 5 = Cancelled.
+    job_status: int
+    total_row_count: int
+    processed_row_count: int
+    progress_percentage: float
+    error_message: str | None
+    insert_date: str
+    started_date: str | None
+    completed_date: str | None
+    cancelled_date: str | None
+
+
+class DownloadJobSearchResponseData(TypedDict):
+    """Pagination envelope. Use a job's `id` with `client.download_jobs.download()`/`cancel()`."""
+
+    items: list[DownloadJob]
     total_count: int
     page: int
     page_size: int

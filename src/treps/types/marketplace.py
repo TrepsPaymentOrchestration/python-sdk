@@ -116,7 +116,24 @@ class SubMerchantFindRequest(TypedDict, total=False):
     reference_id: str
     reference_ids: list[str]
     name: str
+    commercial_name: str
+    #: 1 = BIREYSEL, 2 = SAHIS, 3 = LTD, 4 = AS, 5 = DERNEK.
+    sole_prop_flag: int
+    tax_office: str
     vkn_tckn: str
+    district: str
+    province_code: str
+    #: 3-letter country code, e.g. "TUR".
+    country_alpha3: str
+    email: str
+    phone: str
+    #: 1 = IBAN, 2 = WALLET.
+    accounting_transfer_method: int
+    iban_owner_name: str
+    iban: str
+    wallet_account_code: str
+    #: Not reliably honored server-side for filtering — MerchantPanel stopped sending it and
+    #: filters active/inactive client-side instead; kept here for completeness.
     status: int
     page: int
     page_size: int

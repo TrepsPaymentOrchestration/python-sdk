@@ -469,10 +469,6 @@ Not yet covered by this SDK (planned as fast-follow module):
 
 - Closed Loop Wallet
 
-Note: `download_jobs.search()` items only expose `report_type`/`job_status` as strongly typed
-fields for now — the backend's full download-job record isn't fully detailed in the current API
-spec, so extra fields come through untyped.
-
 Contributions and issues are welcome — see [SECURITY.md](./SECURITY.md) for reporting
 vulnerabilities specifically.
 
